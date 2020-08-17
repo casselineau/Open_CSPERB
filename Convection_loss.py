@@ -65,13 +65,18 @@ def cyl_conv_loss_coeff_WSVH(height, diameter, velocity, T_wall, T_amb):
 	return h
 
 def cyl_conv_loss_coeff_SK(height, diameter, pipe_radius, velocity, T_wall, T_amb):
-	# External cylinder loss from Siebers and Kraabel (https://www.osti.gov/servlets/purl/6906848):
 	'''
-	"It should be recognized, however, that there are significant indications that the forced convection component of the convective energy losses may be as much as 50% to 100% larger than that estimated with the current knowledge of forced convection from cylinders in a crossflow."
-	"A work by Sastry, et al. [36] examined the effects of horizontal rib-type roughness elements on natural convection from a vertical surface for Gr less than 5 X 10^9. The results of this work showed an increase of over 50% in the heat transfer over the smooth wall case for the roughness sizes conisidered." 
-	Stoddart found the SK correlation applicable to the Solar One receiver (outside of correlation validitry in Grashof) but with larger uncertainty (typically an overprediction of 10%). However, the wall temperature of Solar one was 400C at maximum. In additoion Stoddart note sthat atmospheric turbulence does not seem to enhance convective loss from the receiver at all.
+	External cylinder loss from Siebers and Kraabel (https://www.osti.gov/servlets/purl/6906848):
+	Arguments:
+	- height of the cylindrical receiver in m
+	- diameter of the cylindrical receiver in m
+	- pipe_radius in m
+	- velocity of the woind in m/s
+	- T_wall: average of the external wall temperature of the receiver
+	- T_amb: ambient temperature
+	output: 
+	- Convective heat transfer coefficient in w/m2/K
 	'''
-
 	g = 9.81 # gravity acceleration
 
 	H = height # receiver height, m
@@ -141,7 +146,6 @@ def cyl_conv_loss_coeff_SK(height, diameter, pipe_radius, velocity, T_wall, T_am
 				if Re>1e5:
 					Nu_f_inter.append(Nu_f_1(Re))
 		Nu_f = interpolate(x_inter, Nu_f_inter, ks_D)
-		print Nu_f_inter, Nu_f
 		return Nu_f
 	
 	h_f = k*Nu_f_interpolated(ks_D, Re)/D
@@ -166,5 +170,5 @@ def cyl_conv_loss_coeff_SK(height, diameter, pipe_radius, velocity, T_wall, T_am
 
 	h = (h_f**3.2+h_n_rough**3.2)**(1./3.2)
 
-	return h, Re, Gr
+	return h
 

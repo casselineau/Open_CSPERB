@@ -1,7 +1,82 @@
 import numpy as N
 
+def eval_v_max(e_net_fp, HC, T_in, T_out, W_abs, n_b, D_tube_o, D_tube_in, pipe_spacing):
+
+	n_t = N.floor((W_abs/(n_b)/(D_tube_o+pipe_spacing)))
+	Dh = HC.h(T_out)-HC.h(T_in)
+	vmax = e_net_fp/(Dh*n_t*HC.rho(T_out)*N.pi/4.*D_tube_in**2.)
+
+	return vmax, n_t
+
+def determine_fp(total_power_incident, HC, T_in, T_out, D_tube_o, D_tube_in, n_b_max, W_abs, v_lim_max, v_lim_min=0., prism=True, bank_eff=1., min_fp=1, n_b_min=1, pipe_spacing=1e-3):
+	'''
+	Screen possible flow configurations based on simplified heat transfer assumptions that lead to a conservative flow-velocity estimate:
+	- Even distribution of flux on the banks
+	- user defined pipe bank absorbed thermal efficiency
+
+	Arguments:
+	total_power_incident: incident power on the receiver
+	HC: heat carrier instance
+	T_in, T_out: outlet and inlet HC temperature
+	n_b_max: maximum number of pipe banks considered
+	D_tube_o, D_tube_i: outer and inner tube diameters
+	W_abs: total width of the absorber, this is the cylinder perimeter for a cylindrical receiver.
+	prism: if True, the actual absorber width is calculated from the width of cylindrical receiver banks rather than the full circular base perimeter
+	v_lim_max: flow velocity limit in the receiver
+	bank_eff: adjustment factor to account for bank absorbed-themal efficiency
+	min_fp: minimum number of flow-paths to consider
+	n_b_min: minimum number of banks to consider
+	pipe_spacing: space between pipes in the banks.
+
+	Returns:
+	n_bs: Number of banks evaluated
+	n_fps: simplest flow paths for the corresponding number of banks
+	v_max: maximum velicity estimated
+	n_ts: number of tubes per bank
+	'''
+	n_bs = []
+	n_fps = []
+	v_maxs = []
+	n_ts = []
+	# Screen the number of banks:
+	for n_b in N.arange(n_b_min, n_b_max+1):
+		# Check the possible flow-path configurations for this number of banks:
+		n_fp = []
+		for i in N.arange(min_fp,n_b+1):
+			if ((n_b)%i)==0:
+				n_fp.append(i)
+		n_fp = N.array(n_fp)
+		print 'For %s banks, %s flow path configurations evaluated: %s'%(str(n_b),str(len(n_fp)), str(n_fp))
+
+		e_net_fp = bank_eff*total_power_incident/n_fp
+		if prism:
+			radius = W_abs/(2.*N.pi)
+			bank_half_angle = N.pi/n_b
+			W_abs_conf = n_b*2.*radius*N.sin(bank_half_angle)
+		else:
+			W_abs_conf = W_abs 
+		v_max, n_t = eval_v_max(e_net_fp, HC, T_in, T_out, W_abs_conf, n_b, D_tube_o, D_tube_in, pipe_spacing)
+		
+		# Find the simplest configuration that respects the limit in velocity. The simplest configuration is the one that has the least flow-paths for the number of banks specified and that respects velocity constraints.
+		idx_valid = N.logical_and(v_max<v_lim_max,v_max>v_lim_min)
+
+		if idx_valid.any():
+			idx_min_fp = N.argmin(n_fp[idx_valid])
+			n_fp_min, v_max = str(n_fp[idx_valid][idx_min_fp]), v_max[idx_valid][idx_min_fp]
+
+			print 'For %s banks, %s flow-paths is the simplest configuration and it has %s m/s maximum velocity'%(n_b, n_fp_min, v_max)
+			n_bs.append(n_b)
+			n_fps.append(n_fp_min)
+			v_maxs.append(v_max)
+			n_ts.append(n_t)
+		else:
+			print 'For %s banks, no valid flow-paths. Velocities:'%(n_b), v_max
+		
+	return n_bs, n_fps, v_maxs, n_ts
+
+
 class Bill_receiver():
-	def __init__(self, width, height, n_banks, n_elems, D_tubes_o, D_tubes_i, abs_t, ems_t,  k_coating=None, D_coating_o=0.):
+	def __init__(self, width, height, n_banks, n_elems, D_tubes_o, D_tubes_i, abs_t, ems_t,  k_coating=None, D_coating_o=0., pipe_spacing=1e-3):
 
 		wid = N.linspace(0., width, n_banks+1)
 		hei = N.linspace(0., height, n_elems+1)
@@ -35,8 +110,9 @@ class Bill_receiver():
 		self.eff_ems = ems_t/(2./N.pi*(1.-ems_t)+ems_t)
 
 		self.k_coating = k_coating
+		self.pipe_spacing = pipe_spacing
 
-	def flow_path(self, option='CTE2bu', sp_file=None, load=None):
+	def flow_path(self, option='CTE2bu', fluxmap_file=None, load=None):
 		'''
 		Flow-path options:
 		- CTE2xy: Center to Edge, dual flow-paths.
@@ -44,7 +120,7 @@ class Bill_receiver():
 			   y = 'u'nidirectional banks or 'a'lternating bank flow directions
 		'''
 
-		fluxmap = N.loadtxt(sp_file, skiprows=7, delimiter=',', usecols=N.arange(1,self.n_banks+1))[::-1]
+		fluxmap = N.loadtxt(fluxmap_file, skiprows=7, delimiter=',', usecols=N.arange(1,self.n_banks+1))[::-1]
 		self.fluxmap = N.array(fluxmap*1000.)
 		if load != None:
 			self.fluxmap = fluxmap*load
@@ -105,6 +181,8 @@ class Bill_receiver():
 		self.q_rad = N.zeros(len(self.wh))
 		self.q_ref = N.zeros(len(self.wh))
 		self.q_conv = N.zeros(len(self.wh))
+		self.q_in = N.zeros(len(self.wh))
+		self.q_abs = N.zeros(len(self.wh))
 		self.T_w_int = N.zeros(len(self.wh))
 		self.T_ext = N.ones(len(self.wh))*self.T_in
 		self.h_conv_int = N.zeros(len(self.wh))
@@ -144,11 +222,13 @@ class Bill_receiver():
 			
 				# Initilaisation of teh flow-path
 				q_ref = (1.-self.eff_abs)*flux_fp*areas
+				q_abs = self.eff_abs*flux_fp*areas
+				q_in = flux_fp*areas
 				q_net = self.eff_abs*flux_fp*areas
 				T_ext = T_in+(T_out-T_in)*q_net/N.sum(q_net)
 				T_HC = N.ones(len(q_net)+1)*T_in
 
-				n_tubes = N.floor(areas/elem_lengths/self.D_coating_o)
+				n_tubes = N.floor(areas/elem_lengths/self.D_coating_o+self.pipe_spacing)
 
 				self.n_tubes[fp] = n_tubes
 
@@ -214,6 +294,8 @@ class Bill_receiver():
 				self.q_rad[fp] = q_rad
 				self.q_ref[fp] = q_ref
 				self.q_conv[fp] = q_conv
+				self.q_in[fp] = q_in
+				self.q_abs[fp] = q_abs
 
 				self.T_w_int[fp] = T_w_int
 				self.T_ext[fp] = T_ext
@@ -233,7 +315,7 @@ class Bill_receiver():
 
 		import pickle
 
-		data = {'wh': self.wh, 'width':self.width, 'height':self.height, 'n_banks':self.n_banks, 'n_elems':self.n_elems, 'D_tubes_o':self.D_tubes_o, 'D_tubes_i':self.D_tubes_i, 'eff_abs':self.eff_abs, 'abs_t':self.abs_t, 'eff_ems':self.eff_ems, 'ems_t':self.ems_t, 'k_t':material.k(self.T_w_int), 'wh_map':self.wh_map, 'fp':self.fp, 'areas':self.areas, 'areas_fp':self.areas_fp, 'HC':HC, 'T_in':self.T_in, 'T_out':self.T_out, 'h_conv_ext':self.h_conv_ext, 'h':self.h, 'm':self.m, 'flux_in':self.flux_fp, 'q_net':self.q_net, 'q_rad':self.q_rad, 'q_ref':self.q_ref, 'q_conv_ext':self.q_conv, 'T_amb':T_amb, 'T_HC':self.T_HC, 'T_w_int':self.T_w_int, 'T_ext':self.T_ext, 'h_conv_int':self.h_conv_int, 'V': self.V, 'fluxmap':self.fluxmap, 'n_tubes':self.n_tubes, 'Dp':self.Dp, 'pipe_lengths':self.pipe_lengths}
+		data = {'wh': self.wh, 'width':self.width, 'height':self.height, 'n_banks':self.n_banks, 'n_elems':self.n_elems, 'D_tubes_o':self.D_tubes_o, 'D_tubes_i':self.D_tubes_i, 'eff_abs':self.eff_abs, 'abs_t':self.abs_t, 'eff_ems':self.eff_ems, 'ems_t':self.ems_t, 'k_t':material.k(self.T_w_int), 'wh_map':self.wh_map, 'fp':self.fp, 'areas':self.areas, 'areas_fp':self.areas_fp, 'HC':HC, 'T_in':self.T_in, 'T_out':self.T_out, 'h_conv_ext':self.h_conv_ext, 'h':self.h, 'm':self.m, 'flux_in':self.flux_fp, 'q_net':self.q_net, 'q_rad':self.q_rad, 'q_ref':self.q_ref, 'q_conv_ext':self.q_conv, 'q_in':self.q_in, 'q_abs':self.q_abs, 'T_amb':T_amb, 'T_HC':self.T_HC, 'T_w_int':self.T_w_int, 'T_ext':self.T_ext, 'h_conv_int':self.h_conv_int, 'V': self.V, 'fluxmap':self.fluxmap, 'n_tubes':self.n_tubes, 'Dp':self.Dp, 'pipe_lengths':self.pipe_lengths}
 
 		file_o = open(filesave, 'w')
 		pickle.dump(data, file_o)
@@ -242,7 +324,7 @@ class Bill_receiver():
 
 class Cyl_receiver():
 
-	def __init__(self, radius, height, n_banks, n_elems, D_tubes_o, D_tubes_i, abs_t, ems_t,  k_coating=None, D_coating_o=0., bank_geom='curved'):
+	def __init__(self, radius, height, n_banks, n_elems, D_tubes_o, D_tubes_i, abs_t, ems_t,  k_coating=None, D_coating_o=None, pipe_spacing=1e-3, bank_geom='curved'):
 
 		ang = N.linspace(0., 2.*N.pi, n_banks+1) # from east, counter-clockwise
 		hei = N.linspace(0., height, n_elems+1)
@@ -256,7 +338,7 @@ class Cyl_receiver():
 
 		self.n_banks = n_banks
 		self.n_elems = n_elems
-		# Cylindrical mesh array. Convention is to take it starting East and counter-clockwise and starting from the bottom of the receiver.
+		# Cylindrical mesh array. Convention is to take it starting South and counter-clockwise and starting from the bottom of the receiver.
 		ahr = N.zeros((n_banks*n_elems, 3, 2))
 		ahr[:,0,0], ahr[:,0,1] = N.tile(ang[:-1], n_elems), N.tile(ang[1:], n_elems)
 		ahr[:,1,0], ahr[:,1,1] = N.repeat(hei[:-1], n_banks), N.repeat(hei[1:], n_banks)
@@ -269,6 +351,8 @@ class Cyl_receiver():
 
 		self.D_tubes_i = D_tubes_i
 		self.D_tubes_o = D_tubes_o
+		if D_coating_o == None:
+			D_coating_o = D_tubes_o
 		self.D_coating_o = D_coating_o
 		if bank_geom == 'curved':
 			self.areas = (self.ahr[:,0,1]-self.ahr[:,0,0])*(self.ahr[:,1,1]-self.ahr[:,1,0])*self.ahr[:,2,0]
@@ -281,9 +365,10 @@ class Cyl_receiver():
 		self.eff_ems = ems_t/(2./N.pi*(1.-ems_t)+ems_t)
 
 		self.k_coating = k_coating
+		self.pipe_spacing = pipe_spacing
 		
 
-	def flow_path(self, option='SENWS', sp_file='/home/charles/Documents/Boulot/ASTRI/Sodium receiver_CMI/flux-table.csv', load=None):
+	def flow_path(self, option='SENWS', fluxmap_file='/home/charles/Documents/Boulot/ASTRI/Sodium receiver_CMI/flux-table.csv', load=None):
 		'''
 		Organises the fluxmap in a series of flow-paths to solve the energy balance problem.
 		The fluxmap from SolarPILOT is given as a 2D array from South counter-clockwise.
@@ -292,13 +377,13 @@ class Cyl_receiver():
 		- SEN-SWN: is a double flow path option. First flow-path geos from South to North via East, the second from South to North, via West. Injected at the top as well.
 		- mvit+x: Multiple Vertical flow-paths introduced at the top and conducting as many vertical passes as needed to cover the profile. The rotation is counter-clockwise, the number of flow-paths is interpreted from the number at the end of the string argument.
 		- smvSit+x: Symmetrical multiple vertical flow-paths south introduced at the top. Same as previous but all inlet is introduced on the south face and progresses towards the north in two groups. One group (even flow-paths) goes counter-clockwise, the other (odd flow-paths) goes clockwise
-		- cmvSit+x: Crossed multiple vertical flow-paths from south and introduced at the top. Same as previous but all inlet is introduced on the south face and progresses until filling the south facing half-cylinder. Afterwards, the flow-paths are "crossed" (central symmetry using the cylinder axis) and the rest of the progression goes from the west and east towards North before exitin the receiever.
-		- cmvNit+x: Crossed multiple vertical flow-paths from North and introduced at the top. Same as previous but all inlet is introduced on the south face and progresses until filling the south facing half-cylinder. Afterwards, the flow-paths are "crossed" (central symmetry using the cylinder axis) and the rest of the progression goes from the west and east towards North before exitin the receiever.
+		- cmvSit+x: Crossed multiple vertical flow-paths from south and introduced at the top. Same as previous but all inlet is introduced on the south face and progresses until filling the south facing half-cylinder. Afterwards, the flow-paths are "crossed" (central symmetry using the cylinder axis) and the rest of the progression goes from the west and east towards North before exiting the receiever.
+		- cmvNit+x: Crossed multiple vertical flow-paths from North and introduced at the top. Same as previous but all inlet is introduced on the south face and progresses until filling the south facing half-cylinder. Afterwards, the flow-paths are "crossed" (central symmetry using the cylinder axis) and the rest of the progression goes from the west and east towards North before exiting the receiever.
 		'''
-		fluxmap = N.loadtxt(sp_file, skiprows=7, delimiter=',', usecols=N.arange(1,self.n_banks+1))[::-1]
+		fluxmap = N.loadtxt(fluxmap_file, skiprows=7, delimiter=',', usecols=N.arange(1,self.n_banks+1))[::-1] # reverse the vertical direction to start the fluxmap from the bottom of the receiver
 		self.fluxmap = N.array(fluxmap*1000.)
 		if load != None:
-			self.fluxmap = fluxmap*load
+			self.fluxmap = self.fluxmap*load
 		flatmap = N.hstack(self.fluxmap)
 
 		if option == 'SENWS':
@@ -307,12 +392,8 @@ class Cyl_receiver():
 			fp = N.zeros(N.shape(self.ahr)[0], dtype=int)
 			
 			for b in xrange(self.n_banks):
-				if b<(self.n_banks/4): # to adjust for the south injection when the ahr is taken as east counter-clockwise
-					idx_ad = 3*self.n_banks/4
-				else:
-					idx_ad = -self.n_banks/4
 				# Reverse bank direction if odd bank.
-				fploc = self.ahr_map[:,b+idx_ad]
+				fploc = self.ahr_map[:,b]
 				fluxloc = self.ahr_map[:,b]
 				if b%2:
 					fploc = fploc[::-1]
@@ -335,15 +416,11 @@ class Cyl_receiver():
 				flux_fp = N.zeros(N.shape(self.ahr)[0]/n_fp)
 				fp = N.zeros(N.shape(self.ahr)[0]/n_fp, dtype=int)
 				for b in xrange(self.n_banks/n_fp):
-					if b<(self.n_banks/4): # to adjust for the south injection when the ahr is taken as east counter-clockwise
-						idx_ad = 3*(self.n_banks/4)
-					else:
-						idx_ad = -self.n_banks/4
 					if f == 0:
-						fploc = self.ahr_map[:,b+self.n_banks/n_fp+idx_ad]
+						fploc = self.ahr_map[:,b+self.n_banks/n_fp]
 						fluxloc = self.ahr_map[:,b+self.n_banks/n_fp]
 					else: # reverse the rotation
-						fploc = self.ahr_map[:,self.n_banks/n_fp-1-b+idx_ad]
+						fploc = self.ahr_map[:,self.n_banks/n_fp-1-b]
 						fluxloc = self.ahr_map[:,self.n_banks/n_fp-1-b]
 					if b%2: # Reverse bank direction if odd bank.
 						fploc = fploc[::-1]
@@ -373,10 +450,6 @@ class Cyl_receiver():
 					# Start and end of the flow-path segment in the fluxmap referential:
 					strt = f*self.n_banks/nf+i
 					end = strt+self.n_banks*self.n_elems
-					if strt<(self.n_banks/4): # to adjust for the south injection when the 												ahr is taken as east counter-clockwise
-						idx_ad = 3*self.n_banks/4
-					else:
-						idx_ad = -self.n_banks/4
 
 					elems = N.arange(strt, end, self.n_banks)
 
@@ -384,7 +457,7 @@ class Cyl_receiver():
 						elems = elems[::-1]
 
 					# Idices of the flow-path segment in the ahr referential.
-					fp[i*self.n_elems: (i+1)*self.n_elems] = elems+idx_ad
+					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
 
 				self.fp.append(fp)
@@ -422,12 +495,7 @@ class Cyl_receiver():
 					if (i%2) == 0:
 						elems = elems[::-1] # if even pass, go down.
 
-					if strt<(self.n_banks/4): # to adjust for the south injection when the 												ahr is taken as east counter-clockwise
-						idx_ad = 3*self.n_banks/4
-					else:
-						idx_ad = -self.n_banks/4
-
-					fp[i*self.n_elems: (i+1)*self.n_elems] = elems+idx_ad
+					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
 
 				self.fp.append(fp)
@@ -475,12 +543,7 @@ class Cyl_receiver():
 					if (i%2) == 0:
 						elems = elems[::-1] # if even pass, go down.
 
-					if strt<(self.n_banks/4): # to adjust for the south injection when the 												ahr is taken as east counter-clockwise
-						idx_ad = 3*self.n_banks/4
-					else:
-						idx_ad = -self.n_banks/4
-
-					fp[i*self.n_elems: (i+1)*self.n_elems] = elems+idx_ad
+					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
 
 				self.fp.append(fp)
@@ -529,12 +592,7 @@ class Cyl_receiver():
 					if (i%2.)==0:
 						elems = elems[::-1] # if even pass, go down.
 
-					if strt<(self.n_banks/4): # to adjust for the orientation the ahr is taken as east counter-clockwise
-						idx_ad = 3*self.n_banks/4
-					else:
-						idx_ad = -self.n_banks/4
-
-					fp[i*self.n_elems: (i+1)*self.n_elems] = elems+idx_ad
+					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
 
 				self.fp.append(fp)
@@ -554,6 +612,8 @@ class Cyl_receiver():
 		self.q_rad = N.zeros(len(self.ahr))
 		self.q_ref = N.zeros(len(self.ahr))
 		self.q_conv = N.zeros(len(self.ahr))
+		self.q_in = N.zeros(len(self.ahr))
+		self.q_abs = N.zeros(len(self.ahr))
 		self.T_w_int = N.zeros(len(self.ahr))
 		self.T_ext = N.ones(len(self.ahr))*self.T_in
 		self.h_conv_int = N.zeros(len(self.ahr))
@@ -570,7 +630,6 @@ class Cyl_receiver():
 			self.h_conv_ext = cyl_conv_loss_coeff_SK(self.height, 2.*self.radius, self.D_coating_o/2., self.air_velocity, (self.T_in+self.T_out)/2., T_amb)
 		else:
 			self.h_conv_ext = h_conv_ext
-
 		convergence_tot = N.ones(len(self.ahr))
 		while (convergence_tot>1e-4).any():
 			self.m = []
@@ -592,11 +651,13 @@ class Cyl_receiver():
 				h[-1] = HC.h(T_out)
 			
 				q_ref = (1.-self.eff_abs)*flux_fp*areas
+				q_in = flux_fp*areas
+				q_abs = self.eff_abs*flux_fp*areas
 				q_net = self.eff_abs*flux_fp*areas
 				T_ext = T_in+(T_out-T_in)*q_net/N.sum(q_net)
 				T_HC = N.ones(len(q_net)+1)*T_in
 
-				n_tubes = N.floor(areas/elem_lengths/self.D_coating_o)
+				n_tubes = N.floor(areas/elem_lengths/(self.D_coating_o+self.pipe_spacing))
 
 				self.n_tubes[fp] = n_tubes
 
@@ -615,7 +676,7 @@ class Cyl_receiver():
 						T_next = T_HC[i]*(1.+q_net[i]/N.sum(q_net))
 						h_next = HC.h(T_next)
 						conv_h = 1.
-						while conv_h>1e-8:
+						while conv_h>1e-7:
 							k = HC.k((T_HC[i]+T_next)/2.)
 							conduction = N.pi*(self.D_tubes_i/2.)**2./elem_lengths[i]*(-k*(T_HC[i]-T_HC[i+1]))
 							h[i+1] = h[i]+(q_net[i]+conduction)/m
@@ -627,9 +688,10 @@ class Cyl_receiver():
 
 					T_w_int = T_HC[1:]
 					conv_T_int = N.ones(len(T_w_int))
-					while (conv_T_int>1e-8).any():
+					while (conv_T_int>1e-7).any():
 
 						h_conv_int = HC.h_conv_tube(m/n_tubes, (T_HC[:-1]+T_HC[1:])/2., T_w_int, self.D_tubes_i)
+
 						T_w_int_new = (T_HC[:-1]+T_HC[1:])/2.+q_net/n_tubes/(h_conv_int*N.pi*self.D_tubes_i/2.*elem_lengths)
 
 						conv_T_int = N.abs(T_w_int-T_w_int_new)/T_w_int
@@ -660,6 +722,8 @@ class Cyl_receiver():
 				self.q_rad[fp] = q_rad
 				self.q_ref[fp] = q_ref
 				self.q_conv[fp] = q_conv
+				self.q_in[fp] = q_in
+				self.q_abs[fp] = q_abs
 
 				self.T_w_int[fp] = T_w_int
 				self.T_ext[fp] = T_ext
@@ -667,14 +731,15 @@ class Cyl_receiver():
 				self.Dp[fp] = HC.p_drop(m/n_tubes, (T_HC[:-1]+T_HC[1:])/2., self.D_tubes_i, elem_lengths)
 				self.V[fp] = V
 			
-			if h_conv_ext == 'WSVH':
-				from Convection_loss import cyl_conv_loss_coeff_WSVH
-				self.h_conv_ext = cyl_conv_loss_coeff_WSVH(self.height, 2.*self.radius, self.air_velocity, N.average(T_ext), T_amb)
-			if h_conv_ext == 'SK':
-				from Convection_loss import cyl_conv_loss_coeff_SK
-				self.h_conv_ext = cyl_conv_loss_coeff_SK(self.height, 2.*self.radius, self.D_coating_o/2., self.air_velocity, N.average(T_ext), T_amb)
-			else:
-				self.h_conv_ext = h_conv_ext
+			# Update convective loss:
+			T_conv_av = N.average(T_ext)
+			if ~N.isnan(T_conv_av):
+				if h_conv_ext == 'WSVH':
+					self.h_conv_ext = cyl_conv_loss_coeff_WSVH(self.height, 2.*self.radius, self.air_velocity, , T_amb)
+				if h_conv_ext == 'SK':
+					self.h_conv_ext = cyl_conv_loss_coeff_SK(self.height, 2.*self.radius, self.D_coating_o/2., self.air_velocity, N.average(T_ext), T_amb)
+				else:
+					self.h_conv_ext = h_conv_ext
 			convergence_tot = N.abs(N.hstack(self.T_ext)-T_ext_old)/N.hstack(self.T_ext)
 		if N.isnan(N.hstack(self.V).any()):
 			print 'Energy balance error'
@@ -682,7 +747,7 @@ class Cyl_receiver():
 			print 'Energy balance OK'
 		import pickle
 
-		data = {'ahr': self.ahr, 'radius':self.radius, 'height':self.height, 'n_banks':self.n_banks, 'n_elems':self.n_elems, 'D_tubes_o':self.D_tubes_o, 'D_tubes_i':self.D_tubes_i, 'eff_abs':self.eff_abs, 'abs_t':self.abs_t, 'eff_ems':self.eff_ems, 'ems_t':self.ems_t, 'k_t':material.k(self.T_w_int), 'ahr_map':self.ahr_map, 'fp':self.fp, 'areas':self.areas, 'areas_fp':self.areas_fp, 'HC':HC, 'T_in':self.T_in, 'T_out':self.T_out, 'h_conv_ext':self.h_conv_ext, 'h':self.h, 'm':self.m, 'flux_in':self.flux_fp, 'q_net':self.q_net, 'q_rad':self.q_rad, 'q_ref':self.q_ref, 'q_conv_ext':self.q_conv, 'T_amb':T_amb, 'T_HC':self.T_HC, 'T_w_int':self.T_w_int, 'T_ext':self.T_ext, 'h_conv_int':self.h_conv_int, 'V': self.V, 'fluxmap':self.fluxmap, 'n_tubes':self.n_tubes, 'Dp':self.Dp, 'pipe_lengths':self.pipe_lengths}
+		data = {'ahr': self.ahr, 'radius':self.radius, 'height':self.height, 'n_banks':self.n_banks, 'n_elems':self.n_elems, 'D_tubes_o':self.D_tubes_o, 'D_tubes_i':self.D_tubes_i, 'eff_abs':self.eff_abs, 'abs_t':self.abs_t, 'eff_ems':self.eff_ems, 'ems_t':self.ems_t, 'k_t':material.k(self.T_w_int), 'ahr_map':self.ahr_map, 'fp':self.fp, 'areas':self.areas, 'areas_fp':self.areas_fp, 'HC':HC, 'T_in':self.T_in, 'T_out':self.T_out, 'h_conv_ext':self.h_conv_ext, 'h':self.h, 'm':self.m, 'flux_in':self.flux_fp, 'q_net':self.q_net, 'q_rad':self.q_rad, 'q_ref':self.q_ref, 'q_conv_ext':self.q_conv, 'q_in':self.q_in, 'q_abs':self.q_abs, 'T_amb':T_amb, 'T_HC':self.T_HC, 'T_w_int':self.T_w_int, 'T_ext':self.T_ext, 'h_conv_int':self.h_conv_int, 'V': self.V, 'fluxmap':self.fluxmap, 'n_tubes':self.n_tubes, 'Dp':self.Dp, 'pipe_lengths':self.pipe_lengths}
 
 		file_o = open(filesave, 'w')
 		pickle.dump(data, file_o)
@@ -697,7 +762,7 @@ if __name__=='__main__':
 
 	#rec = Cyl_receiver(radius=3., height=10., n_banks=16, n_elems=50, D_tubes_o=D_tubes_o, D_tubes_i=D_tubes_o-3e-3, abs_t=0.95, ems_t=0.88, k_coating=0.6, D_coating_o=D_tubes_o+45e-6)
 
-	#rec.flow_path(option='mvit2', sp_file='/home/charles/Documents/Boulot/ASTRI/Sodium receiver_CMI/flux-table-1.csv')
+	#rec.flow_path(option='mvit2', fluxmap_file='/home/charles/Documents/Boulot/ASTRI/Sodium receiver_CMI/flux-table-1.csv')
 	#rec.balance(HC=HC, material=Haynes230(), T_in=240.+273.15, T_out=570.+273.15, T_amb=300., h_conv_ext=30., filesave='/home/charles/Documents/Boulot/These/Tower_receiver/Ref_case/ref_case_results_new')
 
 	from Rec_ref_case_plots import *

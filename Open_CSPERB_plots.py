@@ -637,7 +637,7 @@ def flow_path_plot(files='/home/charles/Documents/Boulot/These/Sodium receiver_C
 
 		angres_per_bank = 1
 		banks = N.shape(fluxmap)[1]
-		fluxmap_fp = N.concatenate((fluxmap[:,banks/4:], fluxmap[:,:banks/4]), axis=1) # correction to start from east
+		fluxmap_fp = fluxmap#N.concatenate((fluxmap[:,banks/4:], fluxmap[:,:banks/4]), axis=1) # correction to start from south
 		flux = N.hstack(fluxmap_fp)/1e6
 		
 		# Set-up the colormap:
@@ -654,7 +654,7 @@ def flow_path_plot(files='/home/charles/Documents/Boulot/These/Sodium receiver_C
 			else:
 				alpha=0.1
 				lw = 0
-			ts = ahr[i,0,:]
+			ts = ahr[i,0,:]-N.pi/2. # south origin for banks
 			hs = ahr[i,1,:]
 			rs = ahr[i,2,0]
 			dt = (ts[1]-ts[0])/float(angres_per_bank)
@@ -713,7 +713,7 @@ def flow_path_plot(files='/home/charles/Documents/Boulot/These/Sodium receiver_C
 		rec3Dsnipet.set_facecolor('None')
 		angres_per_bank = 1
 		banks = N.shape(fluxmap)[1]
-		fluxmap_fp = N.concatenate((fluxmap[:,banks/4:], fluxmap[:,:banks/4]), axis=1) # correction to start from east
+		fluxmap_fp = fluxmap#N.concatenate((fluxmap[:,banks/4:], fluxmap[:,:banks/4]), axis=1) # correction to start from east
 		flux = N.hstack(T_ext)-273.15
 		
 		# Set-up the colormap:
@@ -730,12 +730,13 @@ def flow_path_plot(files='/home/charles/Documents/Boulot/These/Sodium receiver_C
 			else:
 				alpha=0.1
 				lw = 0
-			ts = ahr[i,0,:]
+			ts = ahr[i,0,:]-N.pi/2. # south origin for banks
 			hs = ahr[i,1,:]
 			rs = ahr[i,2,0]
 			dt = (ts[1]-ts[0])/float(angres_per_bank)
 			for j in xrange(angres_per_bank):
 				thetas = [ts[0]+float(j)*dt, ts[0]+(j+1.)*dt]
+
 
 				x = rs*N.cos(thetas)
 
@@ -789,8 +790,9 @@ def flow_path_plot(files='/home/charles/Documents/Boulot/These/Sodium receiver_C
 		bank_lengths = pipe_lengths[flow_path]
 		bank_lengths_2 = (bank_lengths[1:]+bank_lengths[:-1])/2.
 
-		flux_lims = flux_limits(N.ones(len(fp[flow_path]))/n_tubes[fp[flow_path]]*m[flow_path], T_HC[flow_path], flux_limits_file)/1e3
-		plt.plot(bank_lengths, flux_lims, color='r', label=r'${\dot{q}_\mathrm{LIMIT}^{\prime \prime}}$')
+		if flux_limits_file is not None:
+			flux_lims = flux_limits(N.ones(len(fp[flow_path]))/n_tubes[fp[flow_path]]*m[flow_path], T_HC[flow_path], flux_limits_file)/1e3
+			plt.plot(bank_lengths, flux_lims, color='r', label=r'${\dot{q}_\mathrm{LIMIT}^{\prime \prime}}$')
 		plt.plot(bank_lengths_2, flux_in[flow_path]/1e3, label=r'${\dot{q}_\mathrm{in}^{\prime \prime}}$', color='0')
 		plt.plot(bank_lengths_2, q_net[fp[flow_path]]/areas[fp[flow_path]]/1e3, label=r'${\dot{q}^{\prime \prime}_\mathrm{net}}$', color='0.6')
 
@@ -820,8 +822,8 @@ def flow_path_plot(files='/home/charles/Documents/Boulot/These/Sodium receiver_C
 
 		# Fraction of allowable:
 		Fracplot = fig.add_subplot(gs[2,1])
-		
-		plt.plot(bank_lengths_2, q_net[fp[flow_path]]/areas[fp[flow_path]]/1e3/((flux_lims[:-1]+flux_lims[1:])/2.), color='g')
+		if flux_limits_file is not None:
+			plt.plot(bank_lengths_2, q_net[fp[flow_path]]/areas[fp[flow_path]]/1e3/((flux_lims[:-1]+flux_lims[1:])/2.), color='g')
 		plt.ylabel(r'${\frac{\dot{q}_\mathrm{net}^{\prime \prime}}{\dot{q}_\mathrm{LIMIT}^{\prime \prime}}}$')
 		
 		xticks = plt.gca().get_xticks()
