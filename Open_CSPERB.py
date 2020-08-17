@@ -735,11 +735,10 @@ class Cyl_receiver():
 			T_conv_av = N.average(T_ext)
 			if ~N.isnan(T_conv_av):
 				if h_conv_ext == 'WSVH':
-					self.h_conv_ext = cyl_conv_loss_coeff_WSVH(self.height, 2.*self.radius, self.air_velocity, , T_amb)
+					self.h_conv_ext = cyl_conv_loss_coeff_WSVH(self.height, 2.*self.radius, self.air_velocity, T_conv_av, T_amb)
 				if h_conv_ext == 'SK':
-					self.h_conv_ext = cyl_conv_loss_coeff_SK(self.height, 2.*self.radius, self.D_coating_o/2., self.air_velocity, N.average(T_ext), T_amb)
-				else:
-					self.h_conv_ext = h_conv_ext
+					self.h_conv_ext = cyl_conv_loss_coeff_SK(self.height, 2.*self.radius, self.D_coating_o/2., self.air_velocity, T_conv_av, T_amb)
+
 			convergence_tot = N.abs(N.hstack(self.T_ext)-T_ext_old)/N.hstack(self.T_ext)
 		if N.isnan(N.hstack(self.V).any()):
 			print 'Energy balance error'
