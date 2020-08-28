@@ -8,7 +8,7 @@ def eval_v_max(e_net_fp, HC, T_in, T_out, W_abs, n_b, D_tube_o, D_tube_in, pipe_
 
 	return vmax, n_t
 
-def determine_fp(total_power_incident, HC, T_in, T_out, D_tube_o, D_tube_in, n_b_max, W_abs, v_lim_max, v_lim_min=0., prism=True, bank_eff=1., min_fp=1, n_b_min=1, pipe_spacing=1e-3):
+def determine_fp(total_power_incident, HC, T_in, T_out, D_tube_o, D_tube_in, n_b_max, W_abs, v_lim_max, v_lim_min=0., prism=True, bank_eff=1., min_fp=1, n_b_min=1, pipe_spacing=1e-3, even_fp=False):
 	'''
 	Screen possible flow configurations based on simplified heat transfer assumptions that lead to a conservative flow-velocity estimate:
 	- Even distribution of flux on the banks
@@ -27,6 +27,7 @@ def determine_fp(total_power_incident, HC, T_in, T_out, D_tube_o, D_tube_in, n_b
 	min_fp: minimum number of flow-paths to consider
 	n_b_min: minimum number of banks to consider
 	pipe_spacing: space between pipes in the banks.
+	even_fp: imposes even number of flow-poaths if true.
 
 	Returns:
 	n_bs: Number of banks evaluated
@@ -44,6 +45,9 @@ def determine_fp(total_power_incident, HC, T_in, T_out, D_tube_o, D_tube_in, n_b
 		n_fp = []
 		for i in N.arange(min_fp,n_b+1):
 			if ((n_b)%i)==0:
+				if even_fp:
+					if i%2:
+						continue
 				n_fp.append(i)
 		n_fp = N.array(n_fp)
 		print 'For %s banks, %s flow path configurations evaluated: %s'%(str(n_b),str(len(n_fp)), str(n_fp))
@@ -385,6 +389,7 @@ class Cyl_receiver():
 		if load != None:
 			self.fluxmap = self.fluxmap*load
 		flatmap = N.hstack(self.fluxmap)
+		print fluxmap.shape, flatmap.shape
 
 		if option == 'SENWS':
 
@@ -521,21 +526,22 @@ class Cyl_receiver():
 			
 			for f in xrange(nf):
 				fp = N.zeros(len(self.areas)/nf, dtype=N.int16)
-				flux_fp = N.zeros(len(self.areas)/nf)					
-				for i in xrange(vpasses):
-					if i<(vpasses/2):
+				flux_fp = N.zeros(len(self.areas)/nf)
+				half_pass = int(N.ceil(vpasses/2.))
+				for i in range(vpasses):
+					if i< half_pass:
 						if f%2:
-							strt = self.n_banks-(f+1+i*nf)/2
+							strt = self.n_banks-1-(f-1)/2*half_pass-i
 							end = strt+self.n_banks*self.n_elems
 						else:
-							strt = (f+i*nf)/2
+							strt = f/2*half_pass+i
 							end = strt+self.n_banks*self.n_elems
 					else:
 						if f%2:
-							strt = (f-1+i*nf)/2
+							strt = self.n_banks/2-((f-1)/2+1)*(vpasses-half_pass)+(i-half_pass)
 							end = strt+self.n_banks*self.n_elems
 						else:
-							strt = self.n_banks-(f+i*nf)/2-1
+							strt = self.n_banks/2+(f/2+1)*(vpasses-half_pass)-(i-half_pass)-1
 							end = strt+self.n_banks*self.n_elems
 
 					elems = N.arange(strt, end, self.n_banks)
@@ -575,17 +581,17 @@ class Cyl_receiver():
 				for i in range(vpasses):
 					if i< half_pass:
 						if f%2:
-							strt = self.n_banks/2-(f-1)/2*half_pass-1-i
+							strt = self.n_banks/2-1-(f-1)/2*half_pass-i
 							end = strt+self.n_banks*self.n_elems
 						else:
 							strt = self.n_banks/2+f/2*half_pass+i
 							end = strt+self.n_banks*self.n_elems
 					else:
 						if f%2:
-							strt = self.n_banks-1-(f-1)/2*(vpasses-half_pass)+(i-half_pass)
+							strt = self.n_banks-((f-1)/2+1)*(vpasses-half_pass)+(i-half_pass)
 							end = strt+self.n_banks*self.n_elems
 						else:
-							strt = f/2*(vpasses-half_pass)-(i-half_pass)
+							strt = (f/2+1)*(vpasses-half_pass)-(i-half_pass)-1
 							end = strt+self.n_banks*self.n_elems
 					elems = N.arange(strt, end, self.n_banks)
 
@@ -598,7 +604,7 @@ class Cyl_receiver():
 				self.fp.append(fp)
 				self.flux_fp.append(flux_fp)
 				self.areas_fp.append(self.areas[fp])
-			
+
 	def balance(self, HC, material, T_in, T_out, T_amb, h_conv_ext, filesave='/home/charles/Documents/Boulot/ASTRI/Sodium receiver_CMI/ref_case_result', load=1., air_velocity=5.):
 
 		self.h = []
@@ -677,7 +683,7 @@ class Cyl_receiver():
 						h_next = HC.h(T_next)
 						conv_h = 1.
 						while conv_h>1e-7:
-							k = HC.k((T_HC[i]+T_next)/2.)
+							k = HC.k(T_next) #(T_HC[i]+T_next)/2.)
 							conduction = N.pi*(self.D_tubes_i/2.)**2./elem_lengths[i]*(-k*(T_HC[i]-T_HC[i+1]))
 							h[i+1] = h[i]+(q_net[i]+conduction)/m
 							T_next = T_HC[i]+(T_next-T_HC[i])*(h[i+1]-h[i])/(h_next-h[i])
@@ -691,7 +697,6 @@ class Cyl_receiver():
 					while (conv_T_int>1e-7).any():
 
 						h_conv_int = HC.h_conv_tube(m/n_tubes, (T_HC[:-1]+T_HC[1:])/2., T_w_int, self.D_tubes_i)
-
 						T_w_int_new = (T_HC[:-1]+T_HC[1:])/2.+q_net/n_tubes/(h_conv_int*N.pi*self.D_tubes_i/2.*elem_lengths)
 
 						conv_T_int = N.abs(T_w_int-T_w_int_new)/T_w_int
@@ -730,7 +735,7 @@ class Cyl_receiver():
 				self.h_conv_int[fp] = h_conv_int
 				self.Dp[fp] = HC.p_drop(m/n_tubes, (T_HC[:-1]+T_HC[1:])/2., self.D_tubes_i, elem_lengths)
 				self.V[fp] = V
-			
+
 			# Update convective loss:
 			T_conv_av = N.average(T_ext)
 			if ~N.isnan(T_conv_av):
@@ -740,12 +745,12 @@ class Cyl_receiver():
 					self.h_conv_ext = cyl_conv_loss_coeff_SK(self.height, 2.*self.radius, self.D_coating_o/2., self.air_velocity, T_conv_av, T_amb)
 
 			convergence_tot = N.abs(N.hstack(self.T_ext)-T_ext_old)/N.hstack(self.T_ext)
-		if N.isnan(N.hstack(self.V).any()):
+
+		if N.isnan(N.hstack(self.T_ext)).any():
 			print 'Energy balance error'
 		else:
 			print 'Energy balance OK'
 		import pickle
-
 		data = {'ahr': self.ahr, 'radius':self.radius, 'height':self.height, 'n_banks':self.n_banks, 'n_elems':self.n_elems, 'D_tubes_o':self.D_tubes_o, 'D_tubes_i':self.D_tubes_i, 'eff_abs':self.eff_abs, 'abs_t':self.abs_t, 'eff_ems':self.eff_ems, 'ems_t':self.ems_t, 'k_t':material.k(self.T_w_int), 'ahr_map':self.ahr_map, 'fp':self.fp, 'areas':self.areas, 'areas_fp':self.areas_fp, 'HC':HC, 'T_in':self.T_in, 'T_out':self.T_out, 'h_conv_ext':self.h_conv_ext, 'h':self.h, 'm':self.m, 'flux_in':self.flux_fp, 'q_net':self.q_net, 'q_rad':self.q_rad, 'q_ref':self.q_ref, 'q_conv_ext':self.q_conv, 'q_in':self.q_in, 'q_abs':self.q_abs, 'T_amb':T_amb, 'T_HC':self.T_HC, 'T_w_int':self.T_w_int, 'T_ext':self.T_ext, 'h_conv_int':self.h_conv_int, 'V': self.V, 'fluxmap':self.fluxmap, 'n_tubes':self.n_tubes, 'Dp':self.Dp, 'pipe_lengths':self.pipe_lengths}
 
 		file_o = open(filesave, 'w')

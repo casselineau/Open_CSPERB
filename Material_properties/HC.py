@@ -90,7 +90,7 @@ class Na(HC):
 				# Nusselt:
 				Nu = 7.+0.025*(Re*Pr)**0.8	
 			else:
-				print Pr
+				print 'Pr:',Pr
 				print 'Liquid sodium Prandtl number outside of Lyon-Martinelli correlation range(Pr <= 0.1)'
 				return N.nan
 
@@ -98,7 +98,7 @@ class Na(HC):
 			Pe = Re*Pr
 			if self.force_Pe_limits == False:
 				if ~(N.logical_and((Pe>=5.8e1), (Pe<=1.31e4)).all()):
-					print Pe
+					print 'Pe:', Pe
 					print 'Liquid sodium Peclet number outside of Skupinski correlation range(5.8e1 <= Pe <= 1.31e4)'
 					return N.nan
 			if self.force_Re_limits == False:
