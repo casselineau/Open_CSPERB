@@ -438,11 +438,15 @@ class Cyl_receiver():
 				self.flux_fp.append(flux_fp)
 				self.areas_fp.append(self.areas[fp])
 
-		if option[:4] == 'mvit':
+		if option[:3] == 'mvi':
 			# Multiple Vertical flow-paths Itroduced at the Top (mvit+x) going down and up, etc. x is part of the string and specifies the number of flow paths.
 			self.fp = []
 			self.flux_fp = []
 			self.areas_fp = []
+			if option[3] == 't':
+				top_injection = True
+			elif option[3] == 'b':
+				top_injection = False
 			nf = int(option[4:])
 			if (self.n_banks%nf) != 0:
 				print 'Mismatch between the flow path and the discretisation.'
@@ -460,6 +464,8 @@ class Cyl_receiver():
 
 					if (i%2)==0:				
 						elems = elems[::-1]
+					if top_injection == False:
+						elems = elems[::-1]
 
 					# Idices of the flow-path segment in the ahr referential.
 					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
@@ -469,18 +475,22 @@ class Cyl_receiver():
 				self.flux_fp.append(flux_fp)
 				self.areas_fp.append(self.areas[fp])
 
-		if option[:6] == 'smvSit':
-			# Symmetrical multiple vertical flow-paths south introduced at the top. Same as previous but all inlet is introduced on the south face and progresses towards the north in two groups. One group (even flow-paths) goes counter-clockwise, the other (odd flow-paths) goes clockwise.
+		if option[:5] == 'smvSi':
+			# Symmetrical multiple vertical flow-paths south introduced at the top "t" or bottom "b". Same as previous but all inlet is introduced on the south face and progresses towards the north in two groups. One group (even flow-paths) goes counter-clockwise, the other (odd flow-paths) goes clockwise.
 			self.fp = []
 			self.flux_fp = []
 			self.areas_fp = []
+			if option[5] == 't':
+				top_injection = True
+			elif option[5] == 'b':
+				top_injection = False
 			nf = int(option[6:])
 
 			if (self.n_banks%nf) != 0:
 				print 'Mismatch between the flow path and the discretisation.'
 				stop
 			elif (nf%2) != 0:
-				print 'Error, ', nf, ' flow-paths. The number of flow-paths must be even for "smvSit".'
+				print 'Error, ', nf, ' flow-paths. The number of flow-paths must be even for "smvSi".'
 				stop
 
 			vpasses = self.n_banks/nf		
@@ -499,6 +509,8 @@ class Cyl_receiver():
 
 					if (i%2) == 0:
 						elems = elems[::-1] # if even pass, go down.
+					if top_injection == False:
+						elems = elems[::-1]
 
 					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
@@ -508,12 +520,16 @@ class Cyl_receiver():
 				self.areas_fp.append(self.areas[fp])
 
 
-		if option[:6] == 'cmvSit':
+		if option[:5] == 'cmvSi':
 			# Crossed multiple vertical flow-paths from south and introduced at the top. Same as previous but all inlet is introduced on the south face and progresses until filling the south facing half-cylinder. Afterwards, the flow-paths are "crossed" (central symmetry using the cylinder axis) and the rest of the progression goes from the west and east towards North before exitin the receiever.
 
 			self.fp = []
 			self.flux_fp = []
 			self.areas_fp = []
+			if option[5] == 't':
+				top_injection = True
+			elif option[5] == 'b':
+				top_injection = False
 			nf = int(option[6:])
 
 			if (self.n_banks%nf) != 0:
@@ -548,6 +564,8 @@ class Cyl_receiver():
 
 					if (i%2) == 0:
 						elems = elems[::-1] # if even pass, go down.
+					if top_injection == False:
+						elems = elems[::-1]
 
 					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
@@ -556,12 +574,16 @@ class Cyl_receiver():
 				self.flux_fp.append(flux_fp)
 				self.areas_fp.append(self.areas[fp])
 
-		if option[:6] == 'cmvNit':
+		if option[:5] == 'cmvNi':
 			# Crossed multiple vertical flow-paths from North and introduced at the top. Same as previous but all inlet is introduced on the North face and progresses until filling the North facing half-cylinder. Afterwards, the flow-paths are "crossed" (central symmetry using the cylinder axis) and the rest of the progression goes from the west and east towards South before exiting the receiever.
 
 			self.fp = []
 			self.flux_fp = []
 			self.areas_fp = []
+			if option[5] == 't':
+				top_injection = True
+			elif option[5] == 'b':
+				top_injection = False
 			nf = int(option[6:])
 
 			if (self.n_banks%nf) != 0:
@@ -597,6 +619,8 @@ class Cyl_receiver():
 
 					if (i%2.)==0:
 						elems = elems[::-1] # if even pass, go down.
+					if top_injection == False:
+						elems = elems[::-1]
 
 					fp[i*self.n_elems: (i+1)*self.n_elems] = elems
 					flux_fp[i*self.n_elems: (i+1)*self.n_elems] = flatmap[elems]
